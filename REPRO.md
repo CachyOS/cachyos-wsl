@@ -35,11 +35,12 @@ For instance, if you're aiming to reproduce the `archlinux-2026.03.01.160197.wsl
 export IMAGE_VERSION="2026.03.01.160197"
 ```
 
-Then clone the [archlinux-wsl repository](https://gitlab.archlinux.org/archlinux/archlinux-wsl.git) and move into it:
+Then clone the [archlinux-wsl repository](https://gitlab.archlinux.org/archlinux/archlinux-wsl.git), move into it and checkout to the state of the repo corresponding to the image version / date that you're aiming to reproduce:
 
 ```bash
 git clone https://gitlab.archlinux.org/archlinux/archlinux-wsl.git
 cd archlinux-wsl
+git checkout --detach "$(git rev-list -1 --before="$(awk -F. '{print $1"-"$2"-"$3}' <<< "$IMAGE_VERSION") 09:00:00 UTC" main)"
 ```
 
 Note that all the following instructions assume that you are at the root of the archlinux-wsl repository cloned above.
