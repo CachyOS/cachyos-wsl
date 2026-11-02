@@ -1,2 +1,1 @@
-Server = https://cdn77.cachyos.org/repo/$arch/$repo
-Server = https://us.cachyos.org/repo/$arch/$repo
+Server = https://mirror.zyner.org/cachyos/repo/$arch/$repo
