@@ -9,28 +9,43 @@ declare -r WORKDIR="$1"
 declare -r BUILDDIR="$WORKDIR/build"
 declare -r OUTPUTDIR="$WORKDIR/output"
 declare -r IMAGE_VERSION="$2"
-ARCHIVE_SNAPSHOT=$(date -u -d "$(awk -F. '{print $1"-"$2"-"$3}' <<< "$IMAGE_VERSION") -1 day" +"%Y/%m/%d")
-readonly ARCHIVE_SNAPSHOT
 SOURCE_DATE_EPOCH=$(date -u -d "$(awk -F. '{print $1"-"$2"-"$3}' <<< "$IMAGE_VERSION")" +"%s")
 readonly SOURCE_DATE_EPOCH
 export SOURCE_DATE_EPOCH
 
+# Packages installed on top of base
+declare -ra PACKAGES=(
+	base
+	sudo
+	cachyos-keyring
+	cachyos-mirrorlist
+	cachyos-v3-mirrorlist
+	cachyos-hooks
+	cachyos-settings
+	cachyos-rate-mirrors
+	fish
+	cachyos-fish-config
+)
+
 # For eventual debugging purposes
-echo -e "ARCHIVE_SNAPSHOT: ${ARCHIVE_SNAPSHOT}\nSOURCE_DATE_EPOCH: ${SOURCE_DATE_EPOCH}"
+echo -e "SOURCE_DATE_EPOCH: ${SOURCE_DATE_EPOCH}"
+
+# The image only runs on x86-64-v3 CPUs, and so do the tests run from the built rootfs
+if ! /lib/ld-linux-x86-64.so.2 --help | grep -q 'x86-64-v3 (supported, searched)'; then
+	echo "The build host CPU doesn't support x86-64-v3, which is required to build this image" >&2
+	exit 1
+fi
 
 mkdir -vp "$BUILDDIR/alpm-hooks/usr/share/libalpm/hooks"
 find /usr/share/libalpm/hooks -exec ln -sf /dev/null "$BUILDDIR/alpm-hooks"{} \;
 
 mkdir -vp "$BUILDDIR/var/lib/pacman/" "$OUTPUTDIR"
-install -Dm 644 "/usr/share/devtools/pacman.conf.d/extra.conf" "$BUILDDIR/etc/pacman.conf"
 
-sed 's/Include = /&rootfs/g' < "$BUILDDIR/etc/pacman.conf" > "$WORKDIR/pacman.conf"
+# Use build-time mirrorlists, as the host pacman may not support the $arch_v3 variable
+sed 's|Include = /etc/pacman.d/|Include = scripts/pacman.d/|g' < rootfs/etc/pacman.conf > "$WORKDIR/pacman.conf"
 
 cp --recursive --preserve=timestamps rootfs/* "$BUILDDIR/"
 ln -sf /usr/lib/os-release "$BUILDDIR/etc/os-release"
-
-# Use archived repo snapshot from archive.archlinux.org for reproducible builds
-sed -i "1iServer = https://archive.archlinux.org/repos/$ARCHIVE_SNAPSHOT/\\\$repo/os/\\\$arch" rootfs/etc/pacman.d/mirrorlist
 
 fakechroot -- fakeroot -- \
     pacman -Sy --disable-sandbox-filesystem -r "$BUILDDIR" \
@@ -38,12 +53,22 @@ fakechroot -- fakeroot -- \
         --noconfirm --dbpath "$BUILDDIR/var/lib/pacman" \
         --config "$WORKDIR/pacman.conf" \
         --noscriptlet \
-        --hookdir "$BUILDDIR/alpm-hooks/usr/share/libalpm/hooks/" base
+        --hookdir "$BUILDDIR/alpm-hooks/usr/share/libalpm/hooks/" "${PACKAGES[@]}"
 
 fakechroot -- fakeroot -- chroot "$BUILDDIR" update-ca-trust
 fakechroot -- fakeroot -- chroot "$BUILDDIR" pacman-key --init
 fakechroot -- fakeroot -- chroot "$BUILDDIR" pacman-key --populate
 fakechroot -- fakeroot -- chroot "$BUILDDIR" /usr/bin/systemd-sysusers --root "/"
+
+# Replicate the relevant parts of the scriptlets and hooks skipped by --noscriptlet / --hookdir
+fakechroot -- fakeroot -- chroot "$BUILDDIR" /usr/share/libalpm/scripts/cachyos-branding os-release
+printf '%s\n' /usr/bin/fish /bin/fish >> "$BUILDDIR/etc/shells"
+fakechroot -- fakeroot -- chroot "$BUILDDIR" /usr/bin/systemctl enable \
+	ananicy-cpp \
+	cachyos-rate-mirrors.timer \
+	pkgfile-update.timer
+chmod 0440 "$BUILDDIR/etc/sudoers.d/10-wheel"
+
 fakechroot -- fakeroot -- chroot "$BUILDDIR" /usr/bin/systemctl mask \
 	console-getty \
 	systemd-firstboot \
@@ -54,7 +79,7 @@ fakechroot -- fakeroot -- chroot "$BUILDDIR" /usr/bin/systemctl mask \
 	systemd-tmpfiles-setup \
 	systemd-tmpfiles-setup-dev \
 	systemd-tmpfiles-setup-dev-early \
-	tmp.mount 
+	tmp.mount
 
 # Disable getty template units to prevent service failures caused by shared Hyper-V TTY devices across WSL instances
 # See https://github.com/microsoft/WSL/issues/13595
@@ -81,11 +106,11 @@ fakeroot -- \
         --exclude-from=scripts/exclude \
         -C "$BUILDDIR" \
         -c . \
-        -f "$OUTPUTDIR/archlinux-$IMAGE_VERSION.tar"
+        -f "$OUTPUTDIR/cachyos-$IMAGE_VERSION.tar"
 
 cd "$OUTPUTDIR"
-xz -T0 -9 "archlinux-$IMAGE_VERSION.tar"
-mv -v "archlinux-$IMAGE_VERSION.tar.xz" "archlinux-$IMAGE_VERSION.wsl"
-sha256sum "archlinux-$IMAGE_VERSION.wsl" > "archlinux-$IMAGE_VERSION.wsl.SHA256"
+xz -T0 -9 "cachyos-$IMAGE_VERSION.tar"
+mv -v "cachyos-$IMAGE_VERSION.tar.xz" "cachyos-$IMAGE_VERSION.wsl"
+sha256sum "cachyos-$IMAGE_VERSION.wsl" > "cachyos-$IMAGE_VERSION.wsl.SHA256"
 echo "The sha256 hash of the image is:"
-cat "archlinux-$IMAGE_VERSION.wsl.SHA256"
+cat "cachyos-$IMAGE_VERSION.wsl.SHA256"

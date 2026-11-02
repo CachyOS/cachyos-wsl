@@ -16,13 +16,18 @@ declare -r IMAGE_VERSION="$2"
 fakechroot -- fakeroot -- chroot "$BUILDDIR" test "$(wc -l /etc/group | awk '{print $1}')" -gt 10
 fakechroot -- fakeroot -- chroot "$BUILDDIR" test "$(wc -l /etc/passwd | awk '{print $1}')" -gt 10
 fakechroot -- fakeroot -- chroot "$BUILDDIR" pacman-key --init
-fakechroot -- fakeroot -- chroot "$BUILDDIR" pacman-key --populate archlinux
+fakechroot -- fakeroot -- chroot "$BUILDDIR" pacman-key --populate archlinux cachyos
 fakechroot -- fakeroot -- chroot "$BUILDDIR" pacman -Sy --disable-sandbox-filesystem
 fakechroot -- fakeroot -- chroot "$BUILDDIR" pacman -Qqk
 fakechroot -- fakeroot -- chroot "$BUILDDIR" pacman -Syyu --disable-sandbox-filesystem --noconfirm podman grep
 fakechroot -- fakeroot -- chroot "$BUILDDIR" podman -v
 fakechroot -- fakeroot -- chroot "$BUILDDIR" id -u http
 fakechroot -- fakeroot -- chroot "$BUILDDIR" locale | grep -q UTF-8
+fakechroot -- fakeroot -- chroot "$BUILDDIR" grep -q "^ID=cachyos$" /etc/os-release
+fakechroot -- fakeroot -- chroot "$BUILDDIR" grep -qx /usr/bin/fish /etc/shells
+fakechroot -- fakeroot -- chroot "$BUILDDIR" pacman -Qq cachyos-settings cachyos-fish-config cachyos-rate-mirrors
+# fakechroot doesn't wrap statx(), so check from outside the chroot
+test "$(stat -c %a "$BUILDDIR/etc/sudoers.d/10-wheel")" = 440
 
 # Run Microsoft's WSL image validation script: https://github.com/microsoft/WSL/blob/master/distributions/validate-modern.py
 if [ -d "$CLONEDIR" ]; then
@@ -33,4 +38,4 @@ fi
 python -m venv "$VENVDIR"
 export PATH="$VENVDIR/bin:$PATH"
 pip install -r "$CLONEDIR/distributions/requirements.txt"
-python "$CLONEDIR/distributions/validate-modern.py" --tar "$OUTPUTDIR/archlinux-$IMAGE_VERSION.wsl"
+python "$CLONEDIR/distributions/validate-modern.py" --tar "$OUTPUTDIR/cachyos-$IMAGE_VERSION.wsl"

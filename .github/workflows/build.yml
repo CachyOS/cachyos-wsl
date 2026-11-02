@@ -1,0 +1,98 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - cachyos
+  pull_request:
+    branches:
+      - cachyos
+  schedule:
+    # Monthly release, on the 1st at 06:00 UTC
+    - cron: '0 6 1 * *'
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Publish the built image as a GitHub release'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: pacman -Syu --needed --noconfirm git codespell markdownlint shellcheck
+      - uses: actions/checkout@v4
+      - name: codespell
+        run: codespell --enable-colors
+      - name: markdownlint
+        run: mdl --style .mdl_style.rb .
+      - name: shellcheck
+        run: find . -name '*.sh*' -not -path './.git/*' -exec shellcheck --color=always {} +
+
+  build:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    needs: lint
+    outputs:
+      image_version: ${{ steps.vars.outputs.image_version }}
+    steps:
+      - name: Install dependencies
+        run: pacman -Syu --needed --noconfirm make fakechroot fakeroot git python
+      - name: Trust the CachyOS signing key
+        run: |
+          pacman-key --init
+          pacman-key --recv-keys F3B607488DB35A47 --keyserver hkps://keyserver.ubuntu.com
+          pacman-key --lsign-key F3B607488DB35A47
+      - uses: actions/checkout@v4
+      - name: Set variables
+        id: vars
+        run: echo "image_version=$(date -u +'%Y.%m.%d').${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+      - name: Build
+        run: make build IMAGE_VERSION="${{ steps.vars.outputs.image_version }}"
+      - name: Test
+        run: |
+          make test IMAGE_VERSION="${{ steps.vars.outputs.image_version }}"
+          cd workdir/output
+          sha256sum --check "cachyos-${{ steps.vars.outputs.image_version }}.wsl.SHA256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image
+          path: workdir/output/*
+          retention-days: 7
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    if: >-
+      github.ref == 'refs/heads/cachyos' &&
+      (github.event_name == 'schedule' || inputs.release)
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      IMAGE_VERSION: ${{ needs.build.outputs.image_version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: image
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign image
+        run: cosign sign-blob --yes "cachyos-${IMAGE_VERSION}.wsl" --bundle "cachyos-${IMAGE_VERSION}.wsl.bundle"
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${IMAGE_VERSION}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "CachyOS WSL ${IMAGE_VERSION}" \
+            --notes "Automated monthly build of the CachyOS WSL image (x86-64-v3)." \
+            "cachyos-${IMAGE_VERSION}.wsl" \
+            "cachyos-${IMAGE_VERSION}.wsl.SHA256" \
+            "cachyos-${IMAGE_VERSION}.wsl.bundle"
