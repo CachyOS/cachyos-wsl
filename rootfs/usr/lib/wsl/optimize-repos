@@ -1,0 +1,100 @@
+#!/bin/bash
+
+# Enable the CachyOS repositories best matching the CPU and switch the installed packages to them.
+# The detection is based on the one from the CachyOS installer, see
+# https://github.com/CachyOS/cachyos-calamares/blob/cachyos/src/scripts/detect-architecture
+# It is stricter about znver4, as a hypervisor can hide CPU features and packages
+# using a missing instruction would leave the distribution unusable.
+
+set -u
+
+declare -r PACMAN_CONF=/etc/pacman.conf
+
+is_zen45() {
+	local family model
+	family="$(grep -Po 'cpu family\s+:\s+\K([0-9]+)' /proc/cpuinfo | head -n1)"
+	model="$(grep -Po 'model\s+:\s+\K([0-9]+)' /proc/cpuinfo | head -n1)"
+
+	if ! grep -q -w "avx512f" /proc/cpuinfo; then
+		return 1
+	fi
+
+	case "$family" in
+		$((0x19))) # Zen 4
+			if ((model <= 0x0f)); then
+				return 1
+			elif ((model >= 0x10 && model <= 0x1f)) ||
+				((model >= 0x60 && model <= 0xaf)); then
+				return 0
+			fi
+			;;
+		$((0x1a))) # Zen 5+
+			return 0
+			;;
+	esac
+
+	return 1
+}
+
+is_isa_supported() {
+	/lib/ld-linux-x86-64.so.2 --help | grep -q "$1 ("
+}
+
+# The instructions that programs can use with -march=znver4 on top of x86-64-v4
+has_znver4_features() {
+	local flags flag
+	flags=" $(grep -m1 '^flags' /proc/cpuinfo) "
+
+	for flag in abm adx aes avx512_bf16 avx512_bitalg avx512ifma avx512vbmi avx512_vbmi2 \
+		avx512_vnni avx512_vpopcntdq gfni pclmulqdq sha_ni sse4a vaes vpclmulqdq; do
+		[[ $flags == *" $flag "* ]] || return 1
+	done
+}
+
+if grep -Eq '^\[cachyos-(v3|v4|znver4)\]$' "$PACMAN_CONF"; then
+	echo "The optimized repositories are already enabled"
+	exit 0
+fi
+
+if is_zen45 && is_isa_supported x86-64-v4 && has_znver4_features; then
+	# There are no separate znver5 repositories, and the znver4 ones use the v4 mirrorlist
+	declare -r LEVEL=znver4 MIRRORLIST=cachyos-v4-mirrorlist
+elif is_isa_supported x86-64-v4; then
+	declare -r LEVEL=v4 MIRRORLIST=cachyos-v4-mirrorlist
+elif is_isa_supported x86-64-v3; then
+	declare -r LEVEL=v3 MIRRORLIST=cachyos-v3-mirrorlist
+else
+	echo "This CPU doesn't support x86-64-v3, keeping the generic repositories"
+	exit 0
+fi
+
+declare -ra REPOS=("cachyos-$LEVEL" "cachyos-core-$LEVEL" "cachyos-extra-$LEVEL")
+echo "Switching to the ${REPOS[*]} repositories..."
+
+# Only enable the repositories for good once the switch succeeded, so that it can simply be run again
+CONF=$(mktemp "$PACMAN_CONF.XXXXXX") || exit 1
+trap 'rm -f "$CONF"' EXIT
+trap 'exit 1' HUP INT TERM
+
+sections=""
+for repo in "${REPOS[@]}"; do
+	sections+="[$repo]\nInclude = /etc/pacman.d/$MIRRORLIST\n\n"
+done
+sed "/^\[cachyos\]$/i $sections" "$PACMAN_CONF" > "$CONF" || exit 1
+for repo in "${REPOS[@]}"; do
+	grep -qx "\[$repo\]" "$CONF" || exit 1
+done
+
+pacman --config "$CONF" -Sy --noconfirm || exit 1
+
+# A full upgrade doesn't replace packages having the same version in the optimized repositories, so they have to be listed
+mapfile -t packages < <(comm -12 <(pacman -Qq | sort) <(pacman --config "$CONF" -Slq "${REPOS[@]}" | sort))
+pacman --config "$CONF" -Su --noconfirm "${packages[@]}" || exit 1
+
+# Listed packages are not replaced by their optimized replacements (e.g. zlib by zlib-ng-compat), so finish with a plain upgrade
+pacman --config "$CONF" -Su --noconfirm || exit 1
+
+chmod --reference="$PACMAN_CONF" "$CONF" || exit 1
+chown --reference="$PACMAN_CONF" "$CONF" || exit 1
+sync "$CONF"
+mv -f "$CONF" "$PACMAN_CONF" || exit 1

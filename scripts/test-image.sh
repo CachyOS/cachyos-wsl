@@ -25,6 +25,7 @@ fakechroot -- fakeroot -- chroot "$BUILDDIR" id -u http
 fakechroot -- fakeroot -- chroot "$BUILDDIR" locale | grep -q UTF-8
 fakechroot -- fakeroot -- chroot "$BUILDDIR" grep -q "^ID=cachyos$" /etc/os-release
 fakechroot -- fakeroot -- chroot "$BUILDDIR" grep -qx /usr/bin/fish /etc/shells
+fakechroot -- fakeroot -- chroot "$BUILDDIR" sh -c '! grep -Eq "^\[cachyos-(v3|v4|znver4)\]$" /etc/pacman.conf'
 fakechroot -- fakeroot -- chroot "$BUILDDIR" pacman -Qq cachyos-settings cachyos-fish-config cachyos-rate-mirrors
 # fakechroot doesn't wrap statx(), so check from outside the chroot
 test "$(stat -c %a "$BUILDDIR/etc/sudoers.d/10-wheel")" = 440

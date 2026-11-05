@@ -12,7 +12,7 @@ Welcome to the CachyOS WSL image!
 This image is maintained at <https://github.com/CachyOS/cachyos-wsl>.
 
 Please, report bugs at <https://github.com/CachyOS/cachyos-wsl/issues>.
-Note that WSL 1 is not supported, and that this image requires a CPU supporting x86-64-v3 (AVX2).
+Note that WSL 1 is not supported.
 
 For more information about CachyOS, see the CachyOS Wiki at <https://wiki.cachyos.org/>.
 
@@ -29,6 +29,12 @@ if cachyos-rate-mirrors &> /dev/null; then
 	echo "Done"
 else
 	echo "Failed to rank mirrors, keeping the default mirrorlists"
+fi
+
+# Not fatal either, the generic packages work on any CPU
+if ! /usr/lib/wsl/optimize-repos; then
+	echo "Failed to switch to the optimized repositories, keeping the generic packages"
+	echo "You can try again later by running \"sudo /usr/lib/wsl/optimize-repos\""
 fi
 
 # Create the default user, WSL then logs in as $DEFAULT_UID (see defaultUid in /etc/wsl-distribution.conf)

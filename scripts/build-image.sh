@@ -20,6 +20,7 @@ declare -ra PACKAGES=(
 	cachyos-keyring
 	cachyos-mirrorlist
 	cachyos-v3-mirrorlist
+	cachyos-v4-mirrorlist
 	cachyos-hooks
 	cachyos-settings
 	cachyos-rate-mirrors
@@ -30,18 +31,12 @@ declare -ra PACKAGES=(
 # For eventual debugging purposes
 echo -e "SOURCE_DATE_EPOCH: ${SOURCE_DATE_EPOCH}"
 
-# The image only runs on x86-64-v3 CPUs, and so do the tests run from the built rootfs
-if ! /lib/ld-linux-x86-64.so.2 --help | grep -q 'x86-64-v3 (supported, searched)'; then
-	echo "The build host CPU doesn't support x86-64-v3, which is required to build this image" >&2
-	exit 1
-fi
-
 mkdir -vp "$BUILDDIR/alpm-hooks/usr/share/libalpm/hooks"
 find /usr/share/libalpm/hooks -exec ln -sf /dev/null "$BUILDDIR/alpm-hooks"{} \;
 
 mkdir -vp "$BUILDDIR/var/lib/pacman/" "$OUTPUTDIR"
 
-# Use build-time mirrorlists, as the host pacman may not support the $arch_v3 variable
+# Use the build-time mirrorlists, the ones from the packages aren't installed yet
 sed 's|Include = /etc/pacman.d/|Include = scripts/pacman.d/|g' < rootfs/etc/pacman.conf > "$WORKDIR/pacman.conf"
 
 cp --recursive --preserve=timestamps rootfs/* "$BUILDDIR/"

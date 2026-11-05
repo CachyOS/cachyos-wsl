@@ -66,9 +66,32 @@ jobs:
           path: workdir/output/*
           retention-days: 7
 
-  release:
+  test-optimize-repos:
     runs-on: ubuntu-latest
     needs: build
+    env:
+      IMAGE_VERSION: ${{ needs.build.outputs.image_version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: image
+      - name: Switch the image to the optimized repositories
+        run: |
+          xz -dc "cachyos-${IMAGE_VERSION}.wsl" | docker import - cachyos-wsl
+          docker run --rm --privileged cachyos-wsl /usr/bin/bash -euc '
+            pacman-key --init
+            pacman-key --populate archlinux cachyos
+            /usr/lib/wsl/optimize-repos
+            grep -Eq "^\[cachyos-(v3|v4|znver4)\]$" /etc/pacman.conf
+            grep -q "^ID=cachyos$" /etc/os-release
+            pacman -Qqk
+          '
+
+  release:
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - test-optimize-repos
     if: >-
       github.ref == 'refs/heads/cachyos' &&
       (github.event_name == 'schedule' || inputs.release)
@@ -92,7 +115,57 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --target "${GITHUB_SHA}" \
             --title "CachyOS WSL ${IMAGE_VERSION}" \
-            --notes "Automated monthly build of the CachyOS WSL image (x86-64-v3)." \
+            --notes "Automated monthly build of the CachyOS WSL image." \
             "cachyos-${IMAGE_VERSION}.wsl" \
             "cachyos-${IMAGE_VERSION}.wsl.SHA256" \
             "cachyos-${IMAGE_VERSION}.wsl.bundle"
+
+  publish-wsl:
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - release
+    # Enable by setting the PUBLISH_WSL repository variable to "true" once CachyOS is listed in microsoft/WSL
+    if: vars.PUBLISH_WSL == 'true'
+    env:
+      IMAGE_VERSION: ${{ needs.build.outputs.image_version }}
+      GH_TOKEN: ${{ secrets.WSL_PR_TOKEN }}
+    steps:
+      - name: Open a release PR on microsoft/WSL
+        run: |
+          set -euo pipefail
+          release_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${IMAGE_VERSION}"
+          image_checksum=$(curl -sfL "${release_url}/cachyos-${IMAGE_VERSION}.wsl.SHA256" | awk '{print $1} END {if ($1=="") exit 1}')
+
+          # Commit as the owner of WSL_PR_TOKEN, which must have signed the Microsoft CLA
+          login=$(gh api user --jq .login)
+          git config --global user.name "${login}"
+          git config --global user.email "$(gh api user --jq .id)+${login}@users.noreply.github.com"
+
+          mkdir WSL
+          cd WSL
+          git init -q
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/CachyOS/WSL.git"
+          git fetch -q https://github.com/microsoft/WSL.git master
+          git reset -q --hard FETCH_HEAD
+          head="cachyos/${IMAGE_VERSION}"
+          git switch -c "${head}"
+          jq --indent 4 \
+            --arg url "${release_url}/cachyos-${IMAGE_VERSION}.wsl" \
+            --arg sha "${image_checksum}" \
+            '.ModernDistributions.cachyos[0].Amd64Url.Url = $url | .ModernDistributions.cachyos[0].Amd64Url.Sha256 = $sha' \
+            distributions/DistributionInfo.json > "${RUNNER_TEMP}/DistributionInfo.json"
+          mv -f "${RUNNER_TEMP}/DistributionInfo.json" distributions/DistributionInfo.json
+          git diff
+          git add distributions/DistributionInfo.json
+          git commit -q \
+            -m "cachyos: Release ${IMAGE_VERSION}" \
+            -m "This is an automated release [1]." \
+            -m "[1] ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/cachyos/.github/workflows/build.yml"
+          git push -u origin "${head}"
+          gh pr create \
+            --repo microsoft/WSL \
+            --base master \
+            --head "CachyOS:${head}" \
+            --title "$(git show --no-patch --format=%s)" \
+            --body "$(git show --no-patch --format=%b)"

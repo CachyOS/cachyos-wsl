@@ -4,7 +4,7 @@
 
 CachyOS provides a WSL image, based on the [Arch Linux WSL image](https://gitlab.archlinux.org/archlinux/archlinux-wsl).
 
-The image uses the CachyOS x86-64-v3 repositories, so it requires a CPU supporting x86-64-v3 (AVX2), such as Intel Haswell / AMD Excavator or newer.  
+The image itself is generic, so it runs on any x86-64 CPU. Like the CachyOS installer, its first setup then detects the CPU and switches to the best matching CachyOS repositories (`znver4`, `x86-64-v4` or `x86-64-v3`), which downloads the optimized packages.  
 It ships the `cachyos-settings`, `cachyos-rate-mirrors` and `cachyos-fish-config` packages, and its first setup creates a default user (with `fish` as its shell and `sudo` access via the `wheel` group).
 
 Images are built & released monthly (via a [GitHub Actions schedule](https://github.com/CachyOS/cachyos-wsl/actions/workflows/build.yml)).
@@ -54,8 +54,7 @@ default=<Username>
 
 ## Building your own image
 
-This repository contains all scripts and files needed to create a WSL image for CachyOS.  
-The build host must run on a CPU supporting x86-64-v3.
+This repository contains all scripts and files needed to create a WSL image for CachyOS.
 
 ### Dependencies
 
