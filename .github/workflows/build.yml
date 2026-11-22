@@ -33,7 +33,9 @@ jobs:
       - name: markdownlint
         run: mdl --style .mdl_style.rb .
       - name: shellcheck
-        run: find . -name '*.sh*' -not -path './.git/*' -exec shellcheck --color=always {} +
+        run: |
+          find . -name '*.sh*' -not -path './.git/*' -exec shellcheck --color=always {} +
+          shellcheck --color=always rootfs/usr/lib/wsl/optimize-repos rootfs/usr/lib/wsl/install-profiles
 
   build:
     runs-on: ubuntu-latest
@@ -87,11 +89,29 @@ jobs:
             pacman -Qqk
           '
 
+  test-first-setup:
+    runs-on: ubuntu-latest
+    needs: build
+    env:
+      IMAGE_VERSION: ${{ needs.build.outputs.image_version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: image
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install --yes expect
+      - name: Run the first setup and install the profiles
+        run: |
+          xz -dc "cachyos-${IMAGE_VERSION}.wsl" | docker import - cachyos-wsl
+          scripts/test-first-setup.sh cachyos-wsl
+
   release:
     runs-on: ubuntu-latest
     needs:
       - build
       - test-optimize-repos
+      - test-first-setup
     if: >-
       github.ref == 'refs/heads/cachyos' &&
       (github.event_name == 'schedule' || inputs.release)

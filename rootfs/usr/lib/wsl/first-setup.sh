@@ -62,3 +62,17 @@ if [ "$(passwd -S -- "$username" | awk '{print $2}')" != P ]; then
 		echo "Please try again"
 	done
 fi
+
+# Not fatal, the profiles can be installed at any time
+if [ -t 0 ]; then
+	echo
+	# Let Ctrl+C stop the installation without aborting the setup
+	trap : INT
+	if ! /usr/lib/wsl/install-profiles; then
+		echo "The profiles were not installed"
+		echo "You can install them later by running \"sudo /usr/lib/wsl/install-profiles\""
+	fi
+	trap - INT
+fi
+
+exit 0

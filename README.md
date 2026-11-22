@@ -7,6 +7,18 @@ CachyOS provides a WSL image, based on the [Arch Linux WSL image](https://gitlab
 The image itself is generic, so it runs on any x86-64 CPU. Like the CachyOS installer, its first setup then detects the CPU and switches to the best matching CachyOS repositories (`znver4`, `x86-64-v4` or `x86-64-v3`), which downloads the optimized packages.  
 It ships the `cachyos-settings`, `cachyos-rate-mirrors` and `cachyos-fish-config` packages, and its first setup creates a default user (with `fish` as its shell and `sudo` access via the `wheel` group).
 
+At the end of the first setup, optional profiles can be installed:
+
+- `developer`: build tools, git, GitHub CLI, editors and man pages
+- `docker`: Docker Engine with Compose and Buildx, and adds the user to the `docker` group
+- `podman`: rootless Podman with a docker compatible command (only one of `docker` and `podman` can be installed)
+- `ai`: CUDA, cuDNN and PyTorch, only offered when WSL exposes an NVIDIA GPU (AMD GPUs are not supported yet)
+
+They can be installed at any time by running `sudo /usr/lib/wsl/install-profiles`, or for instance `sudo /usr/lib/wsl/install-profiles developer docker`.  
+The `docker` and `podman` profiles are not needed with Docker Desktop's WSL integration, which provides its own `docker` command.
+
+Linux GUI apps work out of the box through [WSLg](https://github.com/microsoft/wslg), just install them. For Qt apps, also install `qt6-wayland`.
+
 Images are built & released monthly (via a [GitHub Actions schedule](https://github.com/CachyOS/cachyos-wsl/actions/workflows/build.yml)).
 
 While images are built regularly, it is strongly recommended running `sudo pacman -Syu` right after the first setup due to the rolling release nature of CachyOS.
